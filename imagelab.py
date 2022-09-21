@@ -86,8 +86,6 @@ def create_box(n):
     return kernel
 
 def correlate(image, kernel, boundary_behavior):
-
-
     """
     Compute the result of correlating the given image with the given kernel.
     `boundary_behavior` will one of the strings 'zero', 'extend', or 'wrap',
