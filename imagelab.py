@@ -84,42 +84,7 @@ def create_box(n):
     for i in range(len(kernel)):
         kernel[i] = 1/len(kernel)
     return kernel
-
-def correlate(image, kernel, boundary_behavior):
-    """
-    Compute the result of correlating the given image with the given kernel.
-    `boundary_behavior` will one of the strings 'zero', 'extend', or 'wrap',
-    and this function will treat out-of-bounds pixels as having the value zero,
-    the value of the nearest edge, or the value wrapped around the other edge
-    of the image, respectively.
-
-    if boundary_behavior is not one of 'zero', 'extend', or 'wrap', return
-    None.
-
-    Otherwise, the output of this function should have the same form as a 6.101
-    image (a dictionary with 'height', 'width', and 'pixels' keys), but its
-    pixel values do not necessarily need to be in the range [0,255], nor do
-    they need to be integers (they should not be clipped or rounded at all).
-
-    This process should not mutate the input image; rather, it should create a
-    separate structure to represent the output.
-
-    KERNEL REPRESENTATION: list of floats where each index = a kernel weight
-    """
-    result = { 'height': image['height'], 
-              'width': image['width'], 
-              'pixels':[0]*len(image['pixels']) }
-    # kernel side length
-    deg = int(math.sqrt(len(kernel)))
-    
-    for y in range(image['height']):
-        for x in range(image['width']):
-            matrix = create_matrix(image, deg, x, y, boundary_behavior)
-            # Store weighted pixel value as sum of a list comprehension
-            val = sum(weight*pix for weight, pix in list(zip(kernel, matrix)))
-            set_pixel(result, x, y, val)
-    return result
-
+   
 def round_and_clip_image(image):
     """
     Given a dictionary, ensure that the values in the 'pixels' list are all
@@ -154,48 +119,72 @@ def edges(image):
         'pixels': [0]*len(image['pixels'])
         }
     kx, ky = [-1, 0, 1, -2, 0, 2, -1, 0, 1], [-1, -2, -1, 0, 0, 0, 1, 2, 1]
-    imx, imy = correlate(image, kx, 'extend'), correlate(image, ky, 'extend')
+    c1, c2 = make_correlate_filter(kx, 'extend'), make_correlate_filter(ky, 'extend')
+    imx, imy = c1(image), c2(image)
     for i in range(len(output['pixels'])):
         output['pixels'][i] = round(math.sqrt(imx['pixels'][i]**2+imy['pixels'][i]**2))
     return round_and_clip_image(output)
     
 # FILTERS
 
-def blurred(image, n):
+def make_correlate_filter(kernel, boundary_behavior):
     """
-    Return a new image representing the result of applying a box blur (with
-    kernel size n) to the given input image.
+    Creates a filter that computes the result of correlating the given image 
+    with the given kernel + boundary behavior.
+    
+    `boundary_behavior` will be one of the strings 'zero', 'extend', or 'wrap',
+    and this function will treat out-of-bounds pixels as having the value zero,
+    the value of the nearest edge, or the value wrapped around the other edge
+    of the image, respectively.
+
+    if boundary_behavior is not one of 'zero', 'extend', or 'wrap', return
+    None.
+
+    Otherwise, the output of the returned function should have the same form as 
+    a 6.101 image (a dictionary with 'height', 'width', and 'pixels' keys), but 
+    its pixel values do not necessarily need to be in the range [0,255], nor do
+    they need to be integers (they should not be clipped or rounded at all).
 
     This process should not mutate the input image; rather, it should create a
     separate structure to represent the output.
+
+    KERNEL REPRESENTATION: list of floats where each index = a kernel weight
     """
-    # first, create a representation for the appropriate n-by-n kernel (you may
-    # wish to define another helper function for this)
+    def correlate(image):
+        result = { 'height': image['height'], 
+                  'width': image['width'], 
+                  'pixels':[0]*len(image['pixels']) }
+        # kernel side length
+        deg = int(math.sqrt(len(kernel)))
+        
+        for y in range(image['height']):
+            for x in range(image['width']):
+                matrix = create_matrix(image, deg, x, y, boundary_behavior)
+                # Store weighted pixel value as sum of a list comprehension
+                val = sum(weight*pix for weight, pix in list(zip(kernel, matrix)))
+                set_pixel(result, x, y, val)
+        return result
+    return correlate
+
+def make_blur_filter(n):
     kernel = create_box(n)
+    def blur(im):
+        correlate = make_correlate_filter(kernel, 'extend')
+        res = correlate(im)
+        return round_and_clip_image(res)
+    return blur
 
-    # then compute the correlation of the input image with that kernel
-    result = correlate(image, kernel, 'extend')
-
-    # and, finally, make sure that the output is a valid image (using the
-    # helper function from above) before returning it.
-    return round_and_clip_image(result)
-
-def sharpened(image, n):
-    """
-    Return a new image representing the result of substracting a blurred version 
-    of image from a scaled version of the original image.
-
-    Does not mutate input image, but creates a separate structure to 
-    represent the sharpened output.
-    """
-    blurry, sharp = blurred(image, n), { 
-        'height': image['height'],
-        'width': image['width'],
-        'pixels': [0]*len(image['pixels'])
-        }
-    for i in range(len(image['pixels'])):
-        sharp['pixels'][i] = 2*image['pixels'][i] - blurry['pixels'][i]
-    return round_and_clip_image(sharp)
+def make_sharpen_filter(n):
+    def sharp(im):
+        blurred, sharpened = make_blur_filter(n)(im), { 
+            'height': im['height'],
+            'width': im['width'],
+            'pixels': [0]*len(im['pixels'])
+            }
+        for i in range(len(im['pixels'])):
+            sharpened['pixels'][i] = 2*im['pixels'][i] - blurred['pixels'][i]
+        return round_and_clip_image(sharpened)
+    return sharp
 
 
 # VARIOUS FILTERS
@@ -223,27 +212,6 @@ def color_filter_from_greyscale_filter(filt):
         return res
     return color
 
-
-def make_blur_filter(n):
-    kernel = create_box(n)
-    def blur(im):
-        res = correlate(im, kernel, 'extend')
-        return round_and_clip_image(res)
-    return blur
-
-
-def make_sharpen_filter(n):
-    def sharp(im):
-        blurred, sharpened = make_blur_filter(n)(im), { 
-            'height': im['height'],
-            'width': im['width'],
-            'pixels': [0]*len(im['pixels'])
-            }
-        for i in range(len(im['pixels'])):
-            sharpened['pixels'][i] = 2*im['pixels'][i] - blurred['pixels'][i]
-        return round_and_clip_image(sharpened)
-    return sharp
-
 def filter_cascade(filters):
     """
     Given a list of filters (implemented as functions on images), returns a new
@@ -257,6 +225,18 @@ def filter_cascade(filters):
         return out
     return cascade
 
+# Directional emboss filter utilizing the correlate function
+def custom_feature(image):
+    k1, filts = [1, 0, 0, 0, 0, 0, 0, 0, -1], []
+    d_emboss = color_filter_from_greyscale_filter(make_correlate_filter(k1, 'extend'))
+    def ripple(image):
+        res = { 'height': image['height'],
+               'width': image['width'],
+               'pixels': image['pixels'].copy() }
+        for y in range(res['height']):
+            return None 
+    # cascade = filter_cascade(filts)
+    return d_emboss(image)
 
 # SEAM CARVING
 
@@ -363,16 +343,12 @@ def minimum_energy_seam(cem):
     'pixels' list that correspond to pixels contained in the minimum-energy
     seam (computed as described in the lab 2 writeup).
     """
-    seam, rows, start, end = [], cem['height'], len(cem['pixels'])-cem['width'], len(cem['pixels'])
-    low = start
-    for i in range(start, end):
-        if cem['pixels'][i] < cem['pixels'][low]:
-            low = i
-    seam.append(low)
+    seam, rows, start = [], cem['height'], len(cem['pixels'])-cem['width']
+    seam.append(cem['pixels'].index(min(cem['pixels'][start:]), start))
     for j in range(rows-1):
         adj = get_adj_pixels(seam[-1], cem['width'], cem['pixels'])
-        next_low = min(adj['pixels'])
-        seam.append(cem['pixels'].index(next_low, adj['indices'][0]))
+        low = min(adj['pixels'])
+        seam.append(cem['pixels'].index(low, adj['indices'][0]))
     return seam
     
 
@@ -503,8 +479,9 @@ if __name__ == "__main__":
     # result_pattern = image_without_seam(pattern, seam)
     # save_color_image(result_pattern, 'result_pattern.png')
     
-    twocats = load_color_image('test_images/twocats.png')
-    seamed_twocats = save_color_image(seam_carving(twocats, 100), 'seamed_twocats.png')
+    # twocats = load_color_image('test_images/twocats.png')
+    # seamed_twocats = save_color_image(seam_carving(twocats, 100), 'seamed_twocats.png')
     
+    embossed_frog = save_color_image(custom_feature(frog), 'embossed_frog.png')
     
     
